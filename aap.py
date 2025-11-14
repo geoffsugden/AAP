@@ -38,6 +38,25 @@ async def read_user_input(writer):
     except Exception as e:
         print(f"[ERROR] Sending failed: {e}")
 
+class AAP:
+
+    def __init__(self, host: str, port: str) -> None:
+        self.host = credentials.host
+        self.port = credentials.port
+        self.connected: bool = False
+
+    @property
+    def controller_name(self) -> str:
+        return self.host
+
+    def connect(self, host: str, port: str) -> bool:
+        return True
+    
+    def disconnect(self) -> bool:
+        self.connected = False
+        return True
+    
+
 
 async def main():
     try:
