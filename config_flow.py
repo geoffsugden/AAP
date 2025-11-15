@@ -1,154 +1,93 @@
-"""Config Flow for AAP."""
-
-from __future__ import annotations
-
-import logging
-from typing import Any
+"""Defines config flow for setup of AAP alarm integration."""
 
 import voluptuous as vol
 
-from homeassistant.config_entries import (
-    #ConfigEntry,
-    ConfigFlow,
-    ConfigFlowResult,
-    # OptionsFlow,
-)
-from homeassistant.const import CONF_HOST, CONF_PORT
-from homeassistant.core import HomeAssistant, callback
-from homeassistant.exceptions import HomeAssistantError
+from typing import Any
 
-from .api import API, APIAuthError, APIConnectionError
+from homeassistant import config_entries
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers import selector
+
 from .const import DOMAIN
-
-_LOGGER = logging.getLogger(__name__)
-
-STEP_USER_DATA_SCHEMA = vol.Schema(
-    {
-        vol.Required(CONF_HOST, description={"suggested_value": "192.168.0.7"}): str,
-        vol.Required(CONF_PORT, description={"suggested_value": "20108"}): str,
-    }
-)
+from .credentials import host, port
 
 
 async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
     """Validate that the user input allows us to connect."""
-    api = API(data[CONF_HOST], data[CONF_PORT])
-    try:
-        await hass.async_add_executor_job(api.connect)
-    except APIAuthError as err:
-        raise InvalidAuth from err
-    except APIConnectionError as err:
-        raise CannotConnect from err
-    return {"title": f"Example Integration - {data[CONF_HOST]}"}
+    return {"title": f"AAP Integration - {data['host']}"}
 
 
-class AAPConfigFlow(ConfigFlow, domain=DOMAIN):
-    """Handles the config flow for the AAP integration."""
+class AAPConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+    """AAP Config Flow."""
 
     VERSION = 1
-    _input_data: dict[str, Any]
 
-    # @staticmethod
-    # @callback
-    # def async_get_options_flow(config_entry):
-    #     """Get the options flow for this handler."""
-    #     return super().async_get_options_flow(config_entry)
+    def __init__(self):
+        """Initialize temporary flow data storage."""
+        self._flow_data: dict[str, Any] = {}
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Handle the initial step."""
-        # Called when you initiate adding an integration through the UI
-        errors: dict[str, str] = {}
-
+    ) -> config_entries.ConfigFlowResult:
+        """Step 1: Ask for host, port and number of sensors."""
         if user_input is not None:
-            # The form has been filled in and submitted, so process the data provided.
-            try:
-                # Validate that the setup data is valid and if not handle errors.
-                info = await validate_input(self.hass, user_input)
-            except CannotConnect:
-                errors["base"] = "cannot_connect"
-            except InvalidAuth:
-                errors["base"] = "invalid_auth"
-            except Exception:  # pylint: disable=broad-except
-                _LOGGER.exception("Unexpected exception")
-                errors["base"] = "unknown"
-            if "base" not in errors:
-                # Validation was succesful, so create a unique id for this instance of your integration and create the config entry.
-                await self.async_set_unique_id(info.get("title"))
-                self._abort_if_unique_id_configured()
-                return self.async_create_entry(title=info["title"], data=user_input)
+            # Store host/port and nymber of sensors in _flow_data
+            self._flow_data["host"] = user_input["host"]
+            self._flow_data["port"] = user_input["port"]
+            self._flow_data["num_sensors"] = int(user_input["num_sensors"])
+            self._flow_data["sensor_names"] = []
 
-        # Show initial form.
+            # Go to next step to ask for each sensor name
+            return await self.async_step_sensor_names()
+
+        # Step 1 form
         return self.async_show_form(
-            step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
-        )
-
-    async def async_step_reconfigure(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Add reconfigure step to allow to reconfigure a config entry."""
-        # This methid displays a reconfigure option in the integration and is
-        # different to options.
-        # It can be used to reconfigure any of the data submitted when first installed.
-        # This is optional and can be removed if you do not want to allow reconfiguration.
-        errors: dict[str, str] = {}
-        config_entry = self.hass.config_entries.async_get_entry(
-            self.context["entry_id"]
-        )
-
-        if user_input is not None:
-            try:
-                user_input[CONF_HOST] = config_entry.data[CONF_HOST]
-                await validate_input(self.hass, user_input)
-            except CannotConnect:
-                errors["base"] = "cannot_connect"
-            except InvalidAuth:
-                errors["base"] = "invalid_auth"
-            except Exception:  # pylint: disable=broad-except
-                _LOGGER.exception("Unexpected exception")
-                errors["base"] = "unknown"
-            else:
-                return self.async_update_reload_and_abort(
-                    config_entry,
-                    unique_id=config_entry.unique_id,
-                    data={**config_entry.data, **user_input},
-                    reason="reconfigure_successful",
-                )
-        return self.async_show_form(
-            step_id="reconfigure",
+            step_id="user",
             data_schema=vol.Schema(
                 {
-                    vol.Required(CONF_HOST, default=config_entry.data[CONF_HOST]): str,
-                    vol.Required(CONF_PORT, default=config_entry.data[CONF_PORT]): str,
+                    vol.Required("host", default=host): str,
+                    vol.Required("port", default=port): int,
+                    vol.Required("num_sensors", default=7): selector.NumberSelector(
+                        config={"min": 0, "max": 32, "mode": "box"}
+                    ),
+                    # vol.Required("num_sensors", default=7): vol.All(
+                    #     vol.Coerce(int), vol.Range(min=1, max=32)
+                    # ),
                 }
             ),
-            errors=errors,
         )
 
+    async def async_step_sensor_names(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Step 2: ask for each sensor name."""
 
-# class AAPOptionsFlowHandler(OptionsFlow):
-#     """Handles the options flow."""
+        index = self._flow_data.get("current_index", 0)
+        num_sensors = self._flow_data["num_sensors"]
 
-#     def __init__(self, config_entry: ConfigEntry) -> None:
-#         """Initialize options flow."""
-#         self.config_entry = config_entry
-#         self.options = dict(config_entry.options)
+        if user_input is not None:
+            self._flow_data["sensor_names"].append(user_input["name"])
+            index += 1
+            self._flow_data["current_index"] = index
 
-#     async def async_step_init(self, user_input=None):
-#         """Handle Options Flow"""
-#         if user_input is not None:
-#             options = self.config_entry.options | user_input
-#             return self.async_create_entry(title="", data=options)
+        if index >= num_sensors:
+            # Skip sensor name collection and create entry immediately
+            data = {
+                "host": self._flow_data["host"],
+                "port": self._flow_data["port"],
+                "sensors": self._flow_data["sensor_names"],
+            }
+            return self.async_create_entry(
+                title=f"AAP Alarm @ {data['host']}:{data['port']}", data=data
+            )
 
-#         data_schema = vol.Schema(
-
-#         )
-
-
-class CannotConnect(HomeAssistantError):
-    """Error to indicate we cannot connect."""
-
-
-class InvalidAuth(HomeAssistantError):
-    """Error to indicate there is invalid auth."""
+        # Ask for the next sensor name
+        return self.async_show_form(
+            step_id="sensor_names",
+            data_schema=vol.Schema(
+                {
+                    vol.Required("name", default=f"Sensor {index + 1}"): str,
+                }
+            ),
+            description_placeholders={"current": f"{index + 1}", "total": num_sensors},
+        )
