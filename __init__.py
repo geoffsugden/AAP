@@ -6,7 +6,7 @@ from homeassistant.const import Platform
 
 from .coordinator import AAPCoordinator
 
-PLATFORMS = [Platform.BINARY_SENSOR]
+PLATFORMS = [Platform.BINARY_SENSOR, Platform.BUTTON]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

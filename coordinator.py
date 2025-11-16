@@ -36,6 +36,8 @@ class AAPCoordinator(DataUpdateCoordinator):
 
         # Start TCP Listener Class
         self._tcp_task = None
+        # Start writer class
+        self._writer = None
 
     async def async_start(self):
         """Start TCP listener after HA has loaded entities."""
@@ -51,6 +53,7 @@ class AAPCoordinator(DataUpdateCoordinator):
         try:
             reader, writer = await asyncio.open_connection(self.host, self.port)
             _LOGGER.info("Connected to AAP alarm at %s:%s", self.host, self.port)
+            self._writer = writer
 
             while True:
                 data = await reader.read(512)
@@ -65,6 +68,8 @@ class AAPCoordinator(DataUpdateCoordinator):
             _LOGGER.info("AAP TCP Listener Cancelled")
         except Exception as e:
             _LOGGER.error("Error in TCP Listener: %s", e)
+        finally:
+            self._writer = None
 
     async def _handle_tcp_message(self, message: str):
         """Parse zone messages and update data."""
@@ -94,3 +99,23 @@ class AAPCoordinator(DataUpdateCoordinator):
             self._tcp_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._tcp_task
+
+    async def async_send_command(self, command: str):
+        """Send a command to the alarm panel."""
+        if self._tcp_task is None:
+            _LOGGER.warning("TCP Listener not started, can't send command.")
+            return
+
+        try:
+            if self._writer is None:
+                reader, writer = await asyncio.open_connection(self.host, self.port)
+                writer.write(f"{command}\n".encode())
+                await writer.drain()
+                writer.close()
+                await writer.wait_closed()
+            else:
+                self._writer.write(f"{command}\n".encode())
+                await self._writer.drain()
+            _LOGGER.info("Sent command: %s", command)
+        except Exception as e:
+            _LOGGER.error("Failed to send command '%s' : %s", command, e)

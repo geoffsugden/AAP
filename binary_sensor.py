@@ -9,9 +9,8 @@ from .coordinator import AAPCoordinator
 from .const import DOMAIN
 
 
-async def async_setup_entry(
-    hass: HomeAssistant, entry: ConfigEntry, async_add_entities
-):
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities):
+
     coordinator: AAPCoordinator = entry.runtime_data
 
     await coordinator.async_config_entry_first_refresh()
@@ -20,11 +19,15 @@ async def async_setup_entry(
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = coordinator
 
-    sensors = [
-        AAPBinarySensor(coordinator, name, zone + 1)
-        for zone, name in enumerate(entry.data["sensors"])
-    ]
-    async_add_entities(sensors)
+    sensors_cfg: list[dict] = entry.data.get("sensors", [])
+
+    entities = []
+    for sensors in sensors_cfg:
+        name = str(sensors["name"])
+        zone = int(sensors["zone"])
+        entities.append(AAPBinarySensor(coordinator, name, zone))
+
+    async_add_entities(entities)
 
 
 class AAPBinarySensor(CoordinatorEntity, BinarySensorEntity):
